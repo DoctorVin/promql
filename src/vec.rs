@@ -106,7 +106,8 @@ fn instant_vec(
 	)
 }
 
-named!(range_literal <CompleteByteSlice, usize>, do_parse!(
+// XXX nom does not allow pub(crate) here
+named_attr!(#[doc(hidden)], pub range_literal <CompleteByteSlice, usize>, do_parse!(
 	num: map!(
 		digit,
 		// from_utf8_unchecked() on [0-9]+ is actually totally safe
