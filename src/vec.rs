@@ -106,7 +106,27 @@ fn instant_vec(
 	)
 }
 
-named!(range_literal <CompleteByteSlice, usize>, do_parse!(
+// create a Vector type from a parsed instant-vector. This specifically disallows range-vector syntax.
+pub(crate) fn instant_vector_strict(
+	input: CompleteByteSlice,
+	allow_periods: bool,
+) -> IResult<CompleteByteSlice, Vector> {
+	ws!(
+		input,
+		do_parse!(
+			labels: call!(instant_vec, allow_periods)
+				>> offset: opt!(ws!(preceded!(tag!("offset"), range_literal)))
+				>> (Vector{
+					labels,
+					range: None,
+					offset
+				})
+		)
+	)
+}
+
+// XXX nom does not allow pub(crate) here
+named_attr!(#[doc(hidden)], pub range_literal <CompleteByteSlice, usize>, do_parse!(
 	num: map!(
 		digit,
 		// from_utf8_unchecked() on [0-9]+ is actually totally safe
@@ -431,5 +451,74 @@ mod tests {
 				}
 			))
 		);
+	}
+
+	#[test]
+	fn strict_instant_vectors_periods() {
+		strict_instant_vectors(true)
+	}
+
+	#[test]
+	fn strict_instant_vectors_no_periods() {
+		strict_instant_vectors(false)
+	}
+
+	fn strict_instant_vectors(allow_periods:bool) {
+		assert_eq!(
+			instant_vector_strict(cbs("foo { }"), allow_periods),
+			Ok((
+				cbs(""),
+				Vector {
+					labels: vec![LabelMatch {
+						name: "__name__".to_string(),
+						op: LabelMatchOp::Eq,
+						value: "foo".to_string(),
+					},],
+					range: None,
+					offset: None
+				}
+			))
+		);
+		assert_eq!(
+			instant_vector_strict(cbs("foo { }[1m]"), allow_periods),
+			Ok((
+				cbs("[1m]"),
+				Vector {
+					labels: vec![LabelMatch {
+						name: "__name__".to_string(),
+						op: LabelMatchOp::Eq,
+						value: "foo".to_string(),
+					},],
+					range: None,
+					offset: None
+				}
+			))
+		);
+		assert_eq!(
+			instant_vector_strict(cbs("foo {bar = 'baz', quux !~ 'xyzzy'} offset 50m"), allow_periods),
+			Ok((
+				cbs(""),
+				Vector {
+					labels: vec![LabelMatch {
+						name: "__name__".to_string(),
+						op: LabelMatchOp::Eq,
+						value: "foo".to_string(),
+						},
+						LabelMatch {
+							name: "bar".to_string(),
+							op: LabelMatchOp::Eq,
+							value: "baz".to_string(),
+						},
+						LabelMatch {
+							name: "quux".to_string(),
+							op: LabelMatchOp::RNe,
+							value: "xyzzy".to_string(),
+						},],
+					range: None,
+					offset: Some(3000),
+				}
+			))
+		);
+
 	}
 }

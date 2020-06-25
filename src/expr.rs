@@ -1,7 +1,7 @@
 use nom::types::CompleteByteSlice;
 use nom::{recognize_float, IResult};
 use str::string;
-use vec::{label_name, vector, Vector};
+use vec::{instant_vector_strict, label_name, range_literal, vector, Vector};
 
 /// PromQL operators
 #[derive(Debug, PartialEq)]
@@ -112,6 +112,17 @@ pub enum Node {
 	},
 	/// Unary negation, e.g. `-b` in `a + -b`
 	Negation(Box<Node>),
+	/// PromQL subquery of the form rate(vector[5m])[1m:30s]. Generally valid for instant-vectors or
+	/// functions.
+	Subquery {
+		// Node here can be either a function or an instant-vector, but it's the target of
+		// our subquery
+		target: Box<Node>,
+		// range is comparable to the range in a vector
+		range: usize,
+		// resolution is strictly optional and defaults to the default evaluation interval
+		resolution: Option<usize>,
+	},
 }
 impl Node {
 	// these functions are here primarily to avoid explicit mention of `Box::new()` in the code
@@ -125,6 +136,13 @@ impl Node {
 	}
 	fn negation(x: Node) -> Node {
 		Node::Negation(Box::new(x))
+	}
+	fn subquery(x: Node, range: usize, resolution: Option<usize>) -> Node {
+		Node::Subquery {
+			target: Box::new(x),
+			range,
+			resolution,
+		}
 	}
 }
 
@@ -194,6 +212,35 @@ fn function(input: CompleteByteSlice, allow_periods: bool) -> IResult<CompleteBy
 	)
 }
 
+fn subquery_range(input: CompleteByteSlice) -> IResult<CompleteByteSlice, (usize, Option<usize>)> {
+	ws!(
+		input,
+		delimited!(
+			char!('['),
+			do_parse!(
+				range: range_literal
+					>> tag!(":") >> resolution: opt!(range_literal)
+					>> ((range, resolution))
+			),
+			char!(']')
+		)
+	)
+}
+
+fn subquery(input: CompleteByteSlice, allow_periods: bool) -> IResult<CompleteByteSlice, Node> {
+	ws!(
+		input,
+		do_parse!(
+			target:
+				alt!(
+					call!(function, allow_periods)
+						| map!(call!(instant_vector_strict, allow_periods), Node::Vector)
+				) >> rr: call!(subquery_range)
+				>> ({ Node::subquery(target, rr.0, rr.1) })
+		)
+	)
+}
+
 fn atom(input: CompleteByteSlice, allow_periods: bool) -> IResult<CompleteByteSlice, Node> {
 	ws!(
 		input,
@@ -210,6 +257,9 @@ fn atom(input: CompleteByteSlice, allow_periods: bool) -> IResult<CompleteByteSl
 			|
 			// unary -, well, negates whatever is following it
 			map!(preceded!(char!('-'), call!(atom, allow_periods)), |a| Node::negation(a))
+			|
+			// look for subquery-able expressions
+			call!(subquery, allow_periods)
 			|
 			// function call is parsed before vector: the latter can actually consume function name as a vector, effectively rendering the rest of the expression invalid
 			call!(function, allow_periods)
@@ -361,7 +411,7 @@ mod tests {
 	use nom::ErrorKind;
 	use vec;
 
-	use self::Node::{Function, Scalar};
+	use self::Node::{Function, Scalar, Subquery};
 	use self::Op::*;
 
 	// cannot 'use self::Node::operator' for some reason
@@ -369,6 +419,8 @@ mod tests {
 	const operator: fn(Node, Op, Node) -> Node = Node::operator;
 	#[allow(non_upper_case_globals)]
 	const negation: fn(Node) -> Node = Node::negation;
+	#[allow(non_upper_case_globals)]
+	const subquery: fn(Node, usize, Option<usize>) -> Node = Node::subquery;
 
 	// vector parsing is already tested in `mod vec`, so use that parser instead of crafting lengthy structs all over the test functions
 	fn vector(expr: &str) -> Node {
@@ -733,6 +785,47 @@ mod tests {
 							labels: vec!["bar".to_string()]
 						}),
 					},
+				)
+			))
+		);
+	}
+	#[test]
+	fn subqueries() {
+		assert_eq!(
+			expression(cbs("range_vector[2m][1m:]"), false),
+			Ok((cbs("[1m:]"), vector("range_vector[2m]"),))
+		);
+		assert_eq!(
+			expression(cbs("instant_vector[1m:]"), false),
+			Ok((cbs(""), subquery(vector("instant_vector"), 60usize, None,)))
+		);
+		assert_eq!(
+			expression(cbs("vector(123)[1m:10s]"), false),
+			Ok((
+				cbs(""),
+				subquery(
+					Function {
+						name: "vector".to_string(),
+						args: vec![Scalar(123f32)],
+						aggregation: None,
+					},
+					60usize,
+					Some(10usize),
+				)
+			))
+		);
+		assert_eq!(
+			expression(cbs("function_name(range_vector[1m]) [10m:1m]"), false),
+			Ok((
+				cbs(""),
+				subquery(
+					Function {
+						name: "function_name".to_string(),
+						args: vec![vector("range_vector[1m]")],
+						aggregation: None,
+					},
+					600usize,
+					Some(60usize),
 				)
 			))
 		);
