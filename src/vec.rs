@@ -116,7 +116,7 @@ pub(crate) fn instant_vector_strict(
 		do_parse!(
 			labels: call!(instant_vec, allow_periods)
 				>> offset: opt!(ws!(preceded!(tag!("offset"), range_literal)))
-				>> (Vector{
+				>> (Vector {
 					labels,
 					range: None,
 					offset
@@ -463,7 +463,7 @@ mod tests {
 		strict_instant_vectors(false)
 	}
 
-	fn strict_instant_vectors(allow_periods:bool) {
+	fn strict_instant_vectors(allow_periods: bool) {
 		assert_eq!(
 			instant_vector_strict(cbs("foo { }"), allow_periods),
 			Ok((
@@ -495,14 +495,18 @@ mod tests {
 			))
 		);
 		assert_eq!(
-			instant_vector_strict(cbs("foo {bar = 'baz', quux !~ 'xyzzy'} offset 50m"), allow_periods),
+			instant_vector_strict(
+				cbs("foo {bar = 'baz', quux !~ 'xyzzy'} offset 50m"),
+				allow_periods
+			),
 			Ok((
 				cbs(""),
 				Vector {
-					labels: vec![LabelMatch {
-						name: "__name__".to_string(),
-						op: LabelMatchOp::Eq,
-						value: "foo".to_string(),
+					labels: vec![
+						LabelMatch {
+							name: "__name__".to_string(),
+							op: LabelMatchOp::Eq,
+							value: "foo".to_string(),
 						},
 						LabelMatch {
 							name: "bar".to_string(),
@@ -513,12 +517,12 @@ mod tests {
 							name: "quux".to_string(),
 							op: LabelMatchOp::RNe,
 							value: "xyzzy".to_string(),
-						},],
+						},
+					],
 					range: None,
 					offset: Some(3000),
 				}
 			))
 		);
-
 	}
 }
