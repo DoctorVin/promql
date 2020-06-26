@@ -800,6 +800,11 @@ mod tests {
 			Ok((cbs(""), subquery(vector("instant_vector"), 60usize, None,)))
 		);
 		assert_eq!(
+			expression(cbs("instant_vector offset 60s [1m:]"), false),
+			Ok((cbs(""), subquery(vector("instant_vector offset 60s"), 60usize, None,)))
+		);
+		// XXX: "instant_vector [1m:] offset 60s" should parse cleanly too
+		assert_eq!(
 			expression(cbs("vector(123)[1m:10s]"), false),
 			Ok((
 				cbs(""),
