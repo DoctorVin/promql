@@ -829,5 +829,47 @@ mod tests {
 				)
 			))
 		);
+		assert_eq!(
+			expression(cbs("histogram_quantile(0.99, sum(rate(some_function(some_range_vector[5m])[10m:]))) by (le, status, tag)"), false),
+			Ok((
+				cbs(""),
+				Function {
+					name: "histogram_quantile".to_string(),
+					args: vec![
+						Scalar(0.99f32),
+						Function {
+							name: "sum".to_string(),
+							args: vec![
+								Function {
+									name: "rate".to_string(),
+									args: vec![
+										subquery(
+											Function {
+												name: "some_function".to_string(),
+												args: vec![
+													vector("some_range_vector[5m]"),
+												],
+												aggregation: None,
+											},
+											600usize,
+											None,
+										),
+									],
+									aggregation: None,
+								},
+							],
+							aggregation: None,
+					}],
+					aggregation: Some(AggregationMod {
+								action: AggregationAction::By,
+								labels: vec![
+									"le".to_string(),
+									"status".to_string(),
+									"tag".to_string(),
+								],
+							}),
+				}
+			))
+		);
 	}
 }
